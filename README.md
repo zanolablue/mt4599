@@ -16,14 +16,51 @@ The first milestone is a **single-sequence** preprocessing pipeline that:
   - linear acceleration \(a_t \in \mathbb{R}^3\) (IMU accel, body frame, gravity not removed)
 - Exposes NumPy arrays that are ready to be windowed and fed into TensorFlow models.
 
-## Dataset
+## Downloading EuRoC
 
 We use the **EuRoC MAV** dataset:
 
 - Primary info page: `http://projects.asl.ethz.ch/datasets/euroc-mav/`
-- Direct research-collection entry: `https://www.research-collection.ethz.ch/entities/researchdata/bcaf173e-5dac-484b-bc37-faf97a594f1f`
+- Research Collection entry: `https://www.research-collection.ethz.ch/entities/researchdata/bcaf173e-5dac-484b-bc37-faf97a594f1f`
 
-You are expected to download and extract one or more EuRoC sequences yourself, then point the preprocessing code at the local sequence directory (for example `data/raw/V1_01_easy`).
+This repo includes a small download helper for a curated subset of sequences (currently `V1_01_easy` and `MH_01_easy`).
+
+### Download zips
+
+Download zip archives into `data/zips`:
+
+```bash
+python -m mt4599.scripts.download_euroc \
+  --output-dir data/zips \
+  --sequences V1_01_easy,MH_01_easy
+```
+
+If you want to run downloads on another machine, print the URLs and suggested `wget` commands:
+
+```bash
+python -m mt4599.scripts.download_euroc \
+  --output-dir data/zips \
+  --sequences V1_01_easy,MH_01_easy \
+  --print-only
+```
+
+### Extract
+
+Extract the downloaded zips into `data/raw`:
+
+```bash
+mkdir -p data/raw
+unzip data/zips/V1_01_easy.zip -d data/raw
+unzip data/zips/MH_01_easy.zip -d data/raw
+```
+
+After extraction you should have directories like:
+
+- `data/raw/V1_01_easy/mav0/imu0/data.csv`
+- `data/raw/V1_01_easy/mav0/state_groundtruth_estimate0/data.csv`
+- `data/raw/MH_01_easy/mav0/imu0/data.csv`
+
+Then you can run preprocessing on a single sequence or use the multi-sequence preprocessing workflow below.
 
 ## Quick start (single sequence preprocessing)
 
@@ -40,7 +77,7 @@ source .venv/bin/activate  # on Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 ```
 
-3. **Download a EuRoC sequence** (e.g. `V1_01_easy`) from the ETH links above and extract it.
+3. **Download and extract a EuRoC sequence** (e.g. `V1_01_easy`).
 
    A typical layout after extraction might look like:
 
@@ -80,29 +117,6 @@ This will:
   2. `vicon0/data.csv` as a fallback.
 - **Gravity**:
   - Linear acceleration from the IMU **includes gravity**. Gravity compensation can be added later in the modelling or analysis stage.
-
-## Download helper
-
-There is a small script to help you download some standard EuRoC sequences (zip archives) directly from the ETH server.
-
-Example: download `V1_01_easy` and `MH_01_easy` into `data/zips` **without** actually downloading (just print commands):
-
-```bash
-python -m mt4599.scripts.download_euroc \
-  --output-dir data/zips \
-  --sequences V1_01_easy,MH_01_easy \
-  --print-only
-```
-
-On a machine where you want to download the data, you can omit `--print-only`:
-
-```bash
-python -m mt4599.scripts.download_euroc \
-  --output-dir data/zips \
-  --sequences V1_01_easy,MH_01_easy
-```
-
-After downloading, extract the zip files (for example into `data/raw/`), then point the preprocessing script at the extracted sequence folder (e.g. `data/raw/V1_01_easy`).
 
 ## End-to-end workflow (multi-sequence + transformer)
 
