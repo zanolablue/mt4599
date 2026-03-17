@@ -84,7 +84,7 @@ def main() -> None:
         filename = f"{name}.zip"
         dest = out_dir / filename
 
-        if args.print-only:
+        if args.print_only:
             print(f"# {name}")
             print(f"# URL: {url}")
             print(f"wget -O {filename} {url}")
@@ -105,7 +105,7 @@ def main() -> None:
 
         print(f"Finished {name}")
 
-    if args.print-only:
+    if args.print_only:
         print(
             "# Copy the printed wget commands to another machine if needed, "
             "then extract the zip files and point preprocessing at the extracted folders."
