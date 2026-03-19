@@ -81,19 +81,19 @@ def _load_euroc_csv(path: Path) -> pd.DataFrame:
     """
     Load a EuRoC-style CSV (IMU or pose) into a DataFrame.
 
-    Handles an optional leading comment line starting with '#'.
+    EuRoC headers look like:  #timestamp [ns],w_RS_S_x [rad s^-1],...
+    The leading '#' is part of the column name, NOT a comment line.
+    We read normally and strip the '#' from the first column name.
     """
     if not path.exists():
         raise FileNotFoundError(path)
 
-    # Peek at the first line to see if it's commented
-    with path.open("r") as f:
-        first_line = f.readline()
+    df = pd.read_csv(path)
 
-    if first_line.startswith("#"):
-        df = pd.read_csv(path, comment="#")
-    else:
-        df = pd.read_csv(path)
+    # Strip leading '#' from first column name (e.g. "#timestamp [ns]" -> "timestamp [ns]")
+    df.columns = df.columns.str.strip()
+    if df.columns[0].startswith("#"):
+        df = df.rename(columns={df.columns[0]: df.columns[0].lstrip("#").strip()})
 
     return df
 
@@ -105,7 +105,7 @@ def _extract_timestamp_seconds(df: pd.DataFrame) -> np.ndarray:
     EuRoC typically uses a column named 'timestamp' or '#timestamp'.
     """
     ts_col = None
-    for candidate in ("timestamp", "#timestamp"):
+    for candidate in ("timestamp [ns]", "timestamp", "#timestamp [ns]", "#timestamp"):
         if candidate in df.columns:
             ts_col = candidate
             break
@@ -259,8 +259,9 @@ def resample_streams(
         raise ValueError("Resampled time grid is too small.")
 
     # IMU: gyro and accel (body frame)
-    gyro, gyro_cols = _select_columns_by_prefix(imu_df, "w_", expected_dim=3)
-    accel, accel_cols = _select_columns_by_prefix(imu_df, "a_", expected_dim=3)
+    # EuRoC column names use full prefixes: w_RS_S_ (gyro) and a_RS_S_ (accel)
+    gyro, gyro_cols = _select_columns_by_prefix(imu_df, "w_RS_S_", expected_dim=3)
+    accel, accel_cols = _select_columns_by_prefix(imu_df, "a_RS_S_", expected_dim=3)
     gyro_grid = _interpolate_1d(t_imu, gyro, t_grid)
     accel_grid = _interpolate_1d(t_imu, accel, t_grid)
 
@@ -398,5 +399,3 @@ def load_resampled_state_sequence(
         }
     )
     return state, resampled["t"], meta
-
-
