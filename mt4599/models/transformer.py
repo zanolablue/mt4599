@@ -40,6 +40,19 @@ def _get_sinusoidal_positional_encoding(max_len: int, d_model: int) -> np.ndarra
     return pe[np.newaxis, ...]
 
 
+class LastTimestep(layers.Layer):
+    """Extract the last timestep from a sequence: (batch, T, D) -> (batch, D).
+
+    Replaces a Lambda layer so the model is fully serialisable with Keras 3.
+    """
+
+    def call(self, x):
+        return x[:, -1, :]
+
+    def get_config(self):
+        return super().get_config()
+
+
 def build_transformer_models(config: TransformerConfig) -> Tuple[Model, Model]:
     """
     Build a baseline Transformer encoder for next-step prediction and a separate encoder model.
@@ -87,15 +100,13 @@ def build_transformer_models(config: TransformerConfig) -> Tuple[Model, Model]:
 
     encoder_outputs = layers.LayerNormalization(epsilon=1e-6, name="encoder_output_ln")(x)
 
-    # Last-timestep representation for next-step prediction
-    last_token = layers.Lambda(
-        lambda t: t[:, -1, :], name="last_token"
-    )(encoder_outputs)
+    # Last-timestep representation for next-step prediction.
+    # Uses a proper named Layer subclass instead of Lambda — Lambda is not
+    # safely serialisable in Keras 3 and will crash model.save().
+    last_token = LastTimestep(name="last_token")(encoder_outputs)
     predictions = layers.Dense(D, name="prediction_head")(last_token)
 
     model = Model(inputs=inputs, outputs=predictions, name="euroc_transformer_next_step")
     encoder = Model(inputs=inputs, outputs=encoder_outputs, name="euroc_transformer_encoder")
 
     return model, encoder
-
-
