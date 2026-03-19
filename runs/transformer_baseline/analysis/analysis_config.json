@@ -1,0 +1,11 @@
+{
+  "embeddings": "runs/transformer_baseline/embeddings_train.npz",
+  "dataset": "data/processed/euroc_W128_S16_dataset.npz",
+  "output_dir": "runs/transformer_baseline/analysis",
+  "n_clusters": 4,
+  "pca_components": 32,
+  "hmm_n_iter": 200,
+  "max_k": 8,
+  "n_embeddings": 9258,
+  "d_model": 128
+}
