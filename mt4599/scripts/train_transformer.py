@@ -204,8 +204,8 @@ def main() -> None:
     test_metrics = model.evaluate(datasets["test"], return_dict=True)
 
     # Save models
-    model.save(output_dir / "model")
-    encoder.save(output_dir / "encoder")
+    model.save(output_dir / "model.keras")
+    encoder.save(output_dir / "encoder.keras")
 
     # Save history and metrics
     _save_history(history, output_dir / "history.json")
