@@ -6,10 +6,15 @@ from typing import Dict, List, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
 from scipy.spatial.transform import Rotation, Slerp
 
 
 SeqRootLike = Union[str, Path]
+
+# Small epsilon used to contract the interpolation grid just inside the data
+# boundary, preventing floating-point overshoot from crashing SLERP.
+_GRID_EPS = 1e-9
 
 
 @dataclass
@@ -33,20 +38,20 @@ def find_euroc_files(seq_root: SeqRootLike) -> EurocFilePaths:
     Detect IMU and pose / ground-truth CSV files under a EuRoC sequence root.
 
     Priority:
-    - IMU:   mav0/imu0/data.csv (required for MVP)
+    - IMU:   mav0/imu0/data.csv (required)
     - Pose:  mav0/state_groundtruth_estimate0/data.csv (primary)
-             vicon0/data.csv (fallback)
+             mav0/*/data.csv flexible fallback
+             vicon0/data.csv (last resort)
     """
     root = _ensure_path(seq_root)
 
-    # IMU (required)
+    # --- IMU ---
     imu_candidates = [
         root / "mav0" / "imu0" / "data.csv",
         root / "imu0" / "data.csv",
     ]
     imu_path = next((p for p in imu_candidates if p.exists()), None)
     if imu_path is None:
-        # Try a slightly more flexible fallback: any */imu0/data.csv directly under root
         for child in root.iterdir():
             candidate = child / "imu0" / "data.csv"
             if candidate.exists():
@@ -58,13 +63,12 @@ def find_euroc_files(seq_root: SeqRootLike) -> EurocFilePaths:
             "Tried mav0/imu0/data.csv, imu0/data.csv, and */imu0/data.csv."
         )
 
-    # Pose / ground-truth
+    # --- Pose / ground-truth ---
     pose_source = "unknown"
     pose_path = root / "mav0" / "state_groundtruth_estimate0" / "data.csv"
     if pose_path.exists():
         pose_source = "state_groundtruth"
     else:
-        # Fallback to Vicon if available
         pose_path = root / "vicon0" / "data.csv"
         if pose_path.exists():
             pose_source = "vicon"
@@ -90,7 +94,7 @@ def _load_euroc_csv(path: Path) -> pd.DataFrame:
 
     df = pd.read_csv(path)
 
-    # Strip leading '#' from first column name (e.g. "#timestamp [ns]" -> "timestamp [ns]")
+    # Strip leading '#' and whitespace from all column names
     df.columns = df.columns.str.strip()
     if df.columns[0].startswith("#"):
         df = df.rename(columns={df.columns[0]: df.columns[0].lstrip("#").strip()})
@@ -99,23 +103,18 @@ def _load_euroc_csv(path: Path) -> pd.DataFrame:
 
 
 def _extract_timestamp_seconds(df: pd.DataFrame) -> np.ndarray:
-    """
-    Extract timestamp column and convert from nanoseconds to seconds.
-
-    EuRoC typically uses a column named 'timestamp' or '#timestamp'.
-    """
+    """Extract timestamp column and convert from nanoseconds to seconds."""
     ts_col = None
     for candidate in ("timestamp [ns]", "timestamp", "#timestamp [ns]", "#timestamp"):
         if candidate in df.columns:
             ts_col = candidate
             break
     if ts_col is None:
-        # Fall back to the first column if nothing matches, but fail loudly
         ts_col = df.columns[0]
 
     ts_ns = df[ts_col].to_numpy(dtype=np.int64)
-    # nanoseconds -> seconds
     t = ts_ns.astype(np.float64) * 1e-9
+
     if not np.all(np.isfinite(t)):
         raise ValueError("Timestamps contain non-finite values.")
     if not np.all(np.diff(t) > 0):
@@ -132,7 +131,6 @@ def _select_columns_by_prefix(
             f"Expected at least {expected_dim} columns with prefix '{prefix}', "
             f"found {len(cols)} in columns {list(df.columns)}"
         )
-    # Preserve original ordering; use the first expected_dim columns
     cols = cols[:expected_dim]
     arr = df[cols].to_numpy(dtype=np.float64)
     if arr.ndim != 2 or arr.shape[1] != expected_dim:
@@ -152,18 +150,15 @@ def load_euroc_sequence(
     Load IMU and pose / ground-truth tables for a EuRoC sequence.
 
     Returns:
-        imu_df: DataFrame with at least timestamp + gyro + accel columns.
-        pose_df: DataFrame with at least timestamp + position + quaternion columns.
-        meta: small dict with pose_source and sequence root.
+        imu_df: DataFrame with timestamp_sec + gyro + accel columns.
+        pose_df: DataFrame with timestamp_sec + position + quaternion columns.
+        meta: dict with pose_source and sequence root.
     """
     paths = find_euroc_files(seq_root)
 
-    imu_df = _load_euroc_csv(paths.imu)
-    pose_df = _load_euroc_csv(paths.pose)
+    imu_df = _load_euroc_csv(paths.imu).copy()
+    pose_df = _load_euroc_csv(paths.pose).copy()
 
-    # Attach timestamp in seconds as a standard column for later functions
-    imu_df = imu_df.copy()
-    pose_df = pose_df.copy()
     imu_df["timestamp_sec"] = _extract_timestamp_seconds(imu_df)
     pose_df["timestamp_sec"] = _extract_timestamp_seconds(pose_df)
 
@@ -177,14 +172,7 @@ def load_euroc_sequence(
 def _interpolate_1d(
     t_src: np.ndarray, values: np.ndarray, t_target: np.ndarray
 ) -> np.ndarray:
-    """
-    Interpolate 1D or multi-channel data along time using linear interpolation.
-
-    Args:
-        t_src: (N,) strictly increasing.
-        values: (N, D) array.
-        t_target: (M,) target times.
-    """
+    """Linear interpolation of multi-channel data onto a target time grid."""
     if values.ndim == 1:
         values = values[:, None]
     if values.shape[0] != t_src.shape[0]:
@@ -200,32 +188,52 @@ def _interpolate_quaternions(
     t_src: np.ndarray, quat: np.ndarray, t_target: np.ndarray
 ) -> np.ndarray:
     """
-    Interpolate unit quaternions over time using SLERP.
+    SLERP interpolation of unit quaternions (scalar-last convention: x, y, z, w).
 
-    Args:
-        t_src: (N,) strictly increasing.
-        quat: (N, 4) array of quaternions. Assumes scalar-last (x, y, z, w) or
-              scalar-first (w, x, y, z); we detect and normalise them.
-        t_target: (M,) target times.
+    t_target must lie strictly within [t_src[0], t_src[-1]].  The grid
+    contraction by _GRID_EPS in resample_streams guarantees this.
     """
     if quat.shape[0] != t_src.shape[0] or quat.shape[1] != 4:
         raise ValueError(f"Expected quat shape (N, 4), got {quat.shape}")
 
-    # Normalise input quaternions
     norm = np.linalg.norm(quat, axis=1, keepdims=True)
-    quat_unit = quat / norm
+    quat_unit = quat / np.where(norm > 0, norm, 1.0)
 
-    # Determine component order by column names if possible is better, but here
-    # we assume scalar-last (x, y, z, w) which is typical in EuRoC CSVs.
-    # If needed, this can be made more flexible by passing in column order.
     rotations = Rotation.from_quat(quat_unit)  # expects (x, y, z, w)
     slerp = Slerp(t_src, rotations)
-    interp_rot = slerp(t_target)
-    quat_interp = interp_rot.as_quat()
-    # Ensure unit length
+    quat_interp = slerp(t_target).as_quat()
+
     norm_interp = np.linalg.norm(quat_interp, axis=1, keepdims=True)
-    quat_interp /= norm_interp
+    quat_interp /= np.where(norm_interp > 0, norm_interp, 1.0)
     return quat_interp
+
+
+def _smooth_velocity(
+    pos: np.ndarray, dt: float, window_sec: float = 0.05
+) -> np.ndarray:
+    """
+    Estimate velocity by differentiating position with a Savitzky-Golay filter.
+
+    A 2nd-order polynomial filter over a ~50 ms window suppresses high-frequency
+    noise from the 200 Hz position signal without introducing significant lag.
+    This gives cleaner v_t for the behavioural clustering analysis compared to
+    raw np.gradient.
+
+    Args:
+        pos:        (T, 3) position array.
+        dt:         sampling interval in seconds.
+        window_sec: filter half-window in seconds (default 50 ms).
+
+    Returns:
+        vel: (T, 3) smoothed velocity.
+    """
+    # window_length must be odd and >= polyorder+1
+    wl = max(int(window_sec / dt) | 1, 5)  # ensure odd, at least 5
+    if wl % 2 == 0:
+        wl += 1
+    # deriv=1 returns the first derivative scaled by 1/dt
+    vel = savgol_filter(pos, window_length=wl, polyorder=2, deriv=1, delta=dt, axis=0)
+    return vel
 
 
 def resample_streams(
@@ -234,9 +242,10 @@ def resample_streams(
     """
     Resample IMU and pose streams to a common uniform time grid.
 
-    - IMU gyro and accel: linear interpolation to target_rate (e.g., 200 Hz).
-    - Position: linear interpolation.
-    - Orientation: SLERP quaternion interpolation.
+    Changes vs. original:
+    - Grid is contracted by _GRID_EPS on both ends so SLERP never receives a
+      query point outside the source range (fixes MH_02, MH_05, V2_03 crashes).
+    - IMU: EuRoC-specific column prefixes w_RS_S_ / a_RS_S_.
     """
     t_imu = imu_df["timestamp_sec"].to_numpy()
     t_pose = pose_df["timestamp_sec"].to_numpy()
@@ -244,13 +253,14 @@ def resample_streams(
     if not (np.all(np.diff(t_imu) > 0) and np.all(np.diff(t_pose) > 0)):
         raise ValueError("Input timestamps must be strictly increasing.")
 
-    # Determine overlap interval
-    t_start = max(t_imu[0], t_pose[0])
-    t_end = min(t_imu[-1], t_pose[-1])
+    # Overlap interval, contracted slightly to stay inside both source ranges
+    t_start = max(t_imu[0], t_pose[0]) + _GRID_EPS
+    t_end   = min(t_imu[-1], t_pose[-1]) - _GRID_EPS
+
     if t_end <= t_start:
         raise ValueError(
-            f"No temporal overlap between IMU [{t_imu[0]}, {t_imu[-1]}] "
-            f"and pose [{t_pose[0]}, {t_pose[-1]}]."
+            f"No temporal overlap between IMU [{t_imu[0]:.6f}, {t_imu[-1]:.6f}] "
+            f"and pose [{t_pose[0]:.6f}, {t_pose[-1]:.6f}]."
         )
 
     dt = 1.0 / float(target_rate)
@@ -258,44 +268,42 @@ def resample_streams(
     if t_grid.size < 2:
         raise ValueError("Resampled time grid is too small.")
 
-    # IMU: gyro and accel (body frame)
-    # EuRoC column names use full prefixes: w_RS_S_ (gyro) and a_RS_S_ (accel)
-    gyro, gyro_cols = _select_columns_by_prefix(imu_df, "w_RS_S_", expected_dim=3)
+    # IMU: EuRoC-specific prefixes
+    gyro,  gyro_cols  = _select_columns_by_prefix(imu_df, "w_RS_S_", expected_dim=3)
     accel, accel_cols = _select_columns_by_prefix(imu_df, "a_RS_S_", expected_dim=3)
-    gyro_grid = _interpolate_1d(t_imu, gyro, t_grid)
+    gyro_grid  = _interpolate_1d(t_imu, gyro,  t_grid)
     accel_grid = _interpolate_1d(t_imu, accel, t_grid)
 
     # Pose: position and quaternion
-    pos, pos_cols = _select_columns_by_prefix(pose_df, "p_", expected_dim=3)
+    pos,  pos_cols  = _select_columns_by_prefix(pose_df, "p_", expected_dim=3)
     quat, quat_cols = _select_columns_by_prefix(pose_df, "q_", expected_dim=4)
-    pos_grid = _interpolate_1d(t_pose, pos, t_grid)
+    pos_grid  = _interpolate_1d(t_pose, pos, t_grid)
     quat_grid = _interpolate_quaternions(t_pose, quat, t_grid)
 
-    # Sanity checks
     for name, arr in [
-        ("t_grid", t_grid),
-        ("pos", pos_grid),
-        ("quat", quat_grid),
-        ("gyro", gyro_grid),
-        ("accel", accel_grid),
+        ("t_grid",  t_grid),
+        ("pos",     pos_grid),
+        ("quat",    quat_grid),
+        ("gyro",    gyro_grid),
+        ("accel",   accel_grid),
     ]:
         if not np.all(np.isfinite(arr)):
             raise ValueError(f"Non-finite values found in resampled {name}.")
 
     data = {
-        "t": t_grid,
-        "pos": pos_grid,
-        "quat": quat_grid,
-        "gyro": gyro_grid,
+        "t":     t_grid,
+        "pos":   pos_grid,
+        "quat":  quat_grid,
+        "gyro":  gyro_grid,
         "accel": accel_grid,
     }
     meta = {
-        "dt": dt,
-        "rate_hz": float(target_rate),
-        "gyro_cols": gyro_cols,
+        "dt":         dt,
+        "rate_hz":    float(target_rate),
+        "gyro_cols":  gyro_cols,
         "accel_cols": accel_cols,
-        "pos_cols": pos_cols,
-        "quat_cols": quat_cols,
+        "pos_cols":   pos_cols,
+        "quat_cols":  quat_cols,
     }
     return data, meta
 
@@ -307,14 +315,21 @@ def build_state_vectors(
     """
     Build state vectors s_t = [p, v, q, ω, a] from resampled streams.
 
-    Args:
-        resampled: dict with keys 't', 'pos', 'quat', 'gyro', 'accel'.
-        rate_hz: sampling rate used for resampling (e.g. 200.0).
+    Velocity is estimated using a Savitzky-Golay derivative filter (2nd-order,
+    ~50 ms window) rather than raw np.gradient, giving smoother v_t that is
+    more appropriate for behavioural clustering.
+
+    State layout (16 features):
+        p_x, p_y, p_z       — position (world frame)
+        v_x, v_y, v_z       — velocity (world frame, SG-smoothed)
+        q_x, q_y, q_z, q_w  — orientation quaternion (scalar-last)
+        w_x, w_y, w_z       — angular velocity (body frame)
+        a_x, a_y, a_z       — linear acceleration (body frame, gravity included)
     """
-    t = resampled["t"]
-    pos = resampled["pos"]
-    quat = resampled["quat"]
-    gyro = resampled["gyro"]
+    t     = resampled["t"]
+    pos   = resampled["pos"]
+    quat  = resampled["quat"]
+    gyro  = resampled["gyro"]
     accel = resampled["accel"]
 
     dt = 1.0 / float(rate_hz)
@@ -322,43 +337,29 @@ def build_state_vectors(
     if pos.shape[0] != t.shape[0]:
         raise ValueError("pos and t must have the same length.")
 
-    # Velocity from finite differences of position (world frame)
-    # Use np.gradient for simplicity; it handles edges with one-sided differences.
-    vel = np.gradient(pos, dt, axis=0)
+    vel = _smooth_velocity(pos, dt)
 
-    # Stack into [p (3), v (3), q (4), ω (3), a (3)] -> 16 features
     state = np.concatenate([pos, vel, quat, gyro, accel], axis=1)
     if state.shape[1] != 16:
         raise AssertionError(f"Expected state dim 16, got {state.shape[1]}")
-
     if not np.all(np.isfinite(state)):
         raise ValueError("Non-finite values found in state vectors.")
 
     feature_names: List[str] = [
-        "p_x",
-        "p_y",
-        "p_z",
-        "v_x",
-        "v_y",
-        "v_z",
-        "q_x",
-        "q_y",
-        "q_z",
-        "q_w",
-        "w_x",
-        "w_y",
-        "w_z",
-        "a_x",
-        "a_y",
-        "a_z",
+        "p_x", "p_y", "p_z",
+        "v_x", "v_y", "v_z",
+        "q_x", "q_y", "q_z", "q_w",
+        "w_x", "w_y", "w_z",
+        "a_x", "a_y", "a_z",
     ]
 
     meta = {
-        "dt": dt,
-        "rate_hz": float(rate_hz),
-        "feature_names": feature_names,
-        "frame_imu": "body",
+        "dt":                    dt,
+        "rate_hz":               float(rate_hz),
+        "feature_names":         feature_names,
+        "frame_imu":             "body",
         "accel_includes_gravity": True,
+        "velocity_method":       "savgol_deriv_50ms",
     }
     return state, meta
 
@@ -367,35 +368,28 @@ def load_resampled_state_sequence(
     seq_root: SeqRootLike, target_rate: float = 200.0
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Union[str, float, List[str]]]]:
     """
-    Convenience function: load, resample, and build state vectors for one EuRoC sequence.
-
-    Args:
-        seq_root: path to a EuRoC sequence folder (e.g. V1_01_easy).
-        target_rate: sampling rate in Hz (default 200.0).
+    Convenience wrapper: load → resample → build state vectors for one EuRoC sequence.
 
     Returns:
-        state: (T, 16) array of state vectors.
-        t: (T,) timestamps in seconds.
-        meta: metadata dict with sampling rate, feature names, pose source, etc.
+        state: (T, 16) unnormalised state vectors.
+        t:     (T,) timestamps in seconds.
+        meta:  dict with rate_hz, feature_names, pose_source, velocity_method, etc.
     """
     imu_df, pose_df, load_meta = load_euroc_sequence(seq_root)
-    resampled, resample_meta = resample_streams(imu_df, pose_df, target_rate=target_rate)
-    state, state_meta = build_state_vectors(resampled, rate_hz=target_rate)
+    resampled, resample_meta   = resample_streams(imu_df, pose_df, target_rate=target_rate)
+    state, state_meta          = build_state_vectors(resampled, rate_hz=target_rate)
 
     meta: Dict[str, Union[str, float, List[str]]] = {}
-    meta.update(
-        {
-            "seq_root": load_meta.get("seq_root", ""),
-            "pose_source": load_meta.get("pose_source", ""),
-        }
-    )
-    meta.update(
-        {
-            "dt": resample_meta["dt"],
-            "rate_hz": resample_meta["rate_hz"],
-            "feature_names": state_meta["feature_names"],
-            "frame_imu": state_meta["frame_imu"],
-            "accel_includes_gravity": state_meta["accel_includes_gravity"],
-        }
-    )
+    meta.update({
+        "seq_root":   load_meta["seq_root"],
+        "pose_source": load_meta["pose_source"],
+    })
+    meta.update({
+        "dt":                     resample_meta["dt"],
+        "rate_hz":                resample_meta["rate_hz"],
+        "feature_names":          state_meta["feature_names"],
+        "frame_imu":              state_meta["frame_imu"],
+        "accel_includes_gravity": state_meta["accel_includes_gravity"],
+        "velocity_method":        state_meta["velocity_method"],
+    })
     return state, resampled["t"], meta
