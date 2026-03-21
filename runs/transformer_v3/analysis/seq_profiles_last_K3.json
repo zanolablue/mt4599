@@ -1,0 +1,50 @@
+{
+  "MH_01_easy": {
+    "C0": 0.8812886142983231,
+    "C1": 0.11871138570167697,
+    "C2": 0.0,
+    "difficulty": "easy",
+    "environment": "MH",
+    "dominant_regime": "C0: Active Flight"
+  },
+  "MH_03_medium": {
+    "C0": 0.6069682151589242,
+    "C1": 0.3930317848410758,
+    "C2": 0.0,
+    "difficulty": "medium",
+    "environment": "MH",
+    "dominant_regime": "C0: Active Flight"
+  },
+  "MH_04_difficult": {
+    "C0": 0.1947840260798696,
+    "C1": 0.7049714751426243,
+    "C2": 0.10024449877750612,
+    "difficulty": "difficult",
+    "environment": "MH",
+    "dominant_regime": "C1: Low-Speed / Hover"
+  },
+  "V1_03_difficult": {
+    "C0": 0.1960030745580323,
+    "C1": 0.2528823981552652,
+    "C2": 0.5511145272867025,
+    "difficulty": "difficult",
+    "environment": "Vicon",
+    "dominant_regime": "C2: Orientation-Dominant"
+  },
+  "V2_01_easy": {
+    "C0": 0.5373563218390804,
+    "C1": 0.3031609195402299,
+    "C2": 0.15948275862068967,
+    "difficulty": "easy",
+    "environment": "Vicon",
+    "dominant_regime": "C0: Active Flight"
+  },
+  "V2_02_medium": {
+    "C0": 0.5083565459610028,
+    "C1": 0.3363509749303621,
+    "C2": 0.15529247910863508,
+    "difficulty": "medium",
+    "environment": "Vicon",
+    "dominant_regime": "C0: Active Flight"
+  }
+}

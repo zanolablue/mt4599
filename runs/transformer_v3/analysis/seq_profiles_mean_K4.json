@@ -1,0 +1,56 @@
+{
+  "MH_01_easy": {
+    "C0": 0.30935569285083847,
+    "C1": 0.5816416593115622,
+    "C2": 0.10900264783759929,
+    "C3": 0.0,
+    "difficulty": "easy",
+    "environment": "MH",
+    "dominant_regime": "C1: Steady Translating Flight"
+  },
+  "MH_03_medium": {
+    "C0": 0.33312958435207823,
+    "C1": 0.3257946210268949,
+    "C2": 0.3410757946210269,
+    "C3": 0.0,
+    "difficulty": "medium",
+    "environment": "MH",
+    "dominant_regime": "C2: Orientation-Dominant Manoeuvre"
+  },
+  "MH_04_difficult": {
+    "C0": 0.24857375713121435,
+    "C1": 0.0,
+    "C2": 0.6503667481662592,
+    "C3": 0.10105949470252648,
+    "difficulty": "difficult",
+    "environment": "MH",
+    "dominant_regime": "C2: Orientation-Dominant Manoeuvre"
+  },
+  "V1_03_difficult": {
+    "C0": 0.13835511145272866,
+    "C1": 0.15987701767870868,
+    "C2": 0.19907763259031513,
+    "C3": 0.5026902382782475,
+    "difficulty": "difficult",
+    "environment": "Vicon",
+    "dominant_regime": "C3: Aggressive / High-Speed Motion"
+  },
+  "V2_01_easy": {
+    "C0": 0.3807471264367816,
+    "C1": 0.21982758620689655,
+    "C2": 0.23347701149425287,
+    "C3": 0.16594827586206898,
+    "difficulty": "easy",
+    "environment": "Vicon",
+    "dominant_regime": "C0: Hover / Low Motion"
+  },
+  "V2_02_medium": {
+    "C0": 0.4387186629526462,
+    "C1": 0.2694986072423398,
+    "C2": 0.20612813370473537,
+    "C3": 0.08565459610027855,
+    "difficulty": "medium",
+    "environment": "Vicon",
+    "dominant_regime": "C0: Hover / Low Motion"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "transformer_config": {
+    "window_length": 128,
+    "feature_dim": 16,
+    "d_model": 128,
+    "num_heads": 4,
+    "num_layers": 3,
+    "d_ff": 256,
+    "dropout": 0.2
+  },
+  "training": {
+    "batch_size": 64,
+    "epochs": 100,
+    "learning_rate": 0.001,
+    "dropout": 0.2,
+    "patience": 15,
+    "predict_horizon": 1,
+    "seed": 42
+  },
+  "dataset": {
+    "path": "data/processed/euroc_W128_S16_v3_dataset.npz",
+    "meta": {
+      "train_sequences": [
+        "MH_01_easy",
+        "MH_03_medium",
+        "MH_04_difficult",
+        "V1_03_difficult"
+      ],
+      "val_sequences": [
+        "V2_01_easy"
+      ],
+      "test_sequences": [
+        "V2_02_medium"
+      ],
+      "window_length": 128,
+      "stride": 16,
+      "feature_dim": 16,
+      "rate_hz": 200.0,
+      "task": "next_step"
+    }
+  }
+}

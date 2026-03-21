@@ -1,0 +1,38 @@
+{
+  "embeddings": "runs/transformer_v3/embeddings_all.npz",
+  "dataset": "data/processed/euroc_W128_S16_v3_dataset.npz",
+  "output_dir": "runs/transformer_v3/analysis",
+  "n_clusters": 4,
+  "pca_components": 32,
+  "hmm_n_iter": 300,
+  "max_k": 8,
+  "n_bootstrap": 50,
+  "all_metrics": {
+    "mean_K4": {
+      "silhouette": 0.1747385561466217,
+      "sil_ci_lo": 0.16627093330025672,
+      "sil_ci_hi": 0.17774483934044838,
+      "db_score": 1.9585981758246864,
+      "ablation": {
+        "real_silhouette": 0.17357879877090454,
+        "random_mean": 0.018801378256427533,
+        "random_std": 0.00024995570994212527,
+        "z_score": 619.2193831071679,
+        "p_empirical": 0.0
+      }
+    },
+    "last_K3": {
+      "silhouette": 0.21689879894256592,
+      "sil_ci_lo": 0.2097954384982586,
+      "sil_ci_hi": 0.22280918322503568,
+      "db_score": 1.7858247949458983,
+      "ablation": {
+        "real_silhouette": 0.21234031021595,
+        "random_mean": 0.01947532702892668,
+        "random_std": 0.000280773431978061,
+        "z_score": 686.9061001544239,
+        "p_empirical": 0.0
+      }
+    }
+  }
+}
